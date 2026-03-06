@@ -1,0 +1,49 @@
+# Agent Orchestra Configuration
+#
+# Copy this to agents.yml in your project root and customize.
+
+# Max agents running simultaneously
+max_concurrent_agents: 3
+
+# How often the daemon checks for new tasks (seconds)
+poll_interval: 60
+
+# Kill agents running longer than this (seconds)
+max_agent_runtime: 3600
+
+# Where task queue and agent state files live
+state_dir: .orchestra
+
+# Where Claude Code agent definitions live (.md files)
+agents_dir: .claude/agents
+
+# Define your agent roles
+# Each role maps to a .claude/agents/<role>.md file
+roles:
+  coder:
+    description: "Implements features, fixes bugs, writes tests"
+    git_push: true        # Limit to 1 concurrent (prevents overlapping deploys)
+
+  qa:
+    description: "Reviews code, runs tests, verifies deploys"
+
+  designer:
+    description: "Creates visual assets and designs"
+
+  product:
+    description: "Manages products, uploads to platforms"
+
+  marketing:
+    description: "Creates content, manages social presence"
+    git_push: true
+
+  security:
+    description: "Audits code for vulnerabilities"
+
+  operations:
+    description: "Monitors systems, manages infrastructure"
+
+  # Example: serialized role (max 1 concurrent, prevents race conditions)
+  # social:
+  #   description: "Manages social media engagement"
+  #   serialize: true

@@ -1,0 +1,133 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Company Status — quick overview of agent activity
+#
+# Usage: company-status
+
+$LOAD_PATH.unshift File.join(__dir__, "..", "lib")
+require "agent_orchestra"
+
+config = AgentOrchestra.config
+queue = AgentOrchestra::Queue.new
+runs_dir = config.runs_dir
+
+puts
+puts "=" * 60
+puts "  AGENT ORCHESTRA STATUS"
+puts "=" * 60
+puts
+
+# Running agents
+running = []
+if Dir.exist?(runs_dir)
+  Dir.glob(File.join(runs_dir, "*.running")).each do |f|
+    begin
+      state = YAML.load_file(f)
+      pid = state["pid"]
+      alive = begin
+        Process.kill(0, pid)
+        true
+      rescue Errno::ESRCH, Errno::EPERM
+        false
+      end
+      next unless alive
+
+      started = Time.parse(state["started_at"])
+      duration = Time.now - started
+      dur_str = if duration < 60
+        "#{duration.to_i}s"
+      elsif duration < 3600
+        "#{(duration / 60).to_i}m"
+      else
+        "#{(duration / 3600).to_i}h #{((duration % 3600) / 60).to_i}m"
+      end
+
+      running << { task: state["task_id"], role: state["role"], duration: dur_str }
+    rescue StandardError
+      next
+    end
+  end
+end
+
+puts "ACTIVE AGENTS (#{running.size})"
+puts "-" * 50
+if running.any?
+  running.each do |a|
+    puts "  #{a[:role].to_s.ljust(12)} working on #{a[:task]} (#{a[:duration]})"
+  end
+else
+  puts "  (no agents running)"
+end
+puts
+
+# Queue summary
+tasks = queue.all
+by_status = tasks.group_by(&:status)
+
+in_progress = by_status["in_progress"] || []
+claimed = by_status["claimed"] || []
+ready = by_status["ready"] || []
+pending = by_status["pending"] || []
+complete = by_status["complete"] || []
+failed = by_status["failed"] || []
+
+working = in_progress + claimed
+
+puts "WORK IN PROGRESS (#{working.size})"
+puts "-" * 50
+if working.any?
+  working.each do |t|
+    puts "  #{t.id}: #{t.subject.to_s[0..50]}"
+    puts "    Role: #{t.role}, Owner: #{t.owner || "unassigned"}"
+  end
+else
+  puts "  (none)"
+end
+puts
+
+puts "READY FOR WORK (#{ready.size})"
+puts "-" * 50
+if ready.any?
+  ready.first(5).each do |t|
+    puts "  #{t.id}: #{t.subject.to_s[0..50]}"
+    puts "    Role: #{t.role}, Priority: #{t.priority}"
+  end
+  puts "  ... and #{ready.size - 5} more" if ready.size > 5
+else
+  puts "  (queue clear)"
+end
+puts
+
+puts "COMPLETED (#{complete.size})"
+puts "-" * 50
+if complete.any?
+  complete.last(3).each do |t|
+    puts "  #{t.id}: #{t.subject.to_s[0..50]}"
+  end
+else
+  puts "  (none)"
+end
+puts
+
+if failed.any?
+  puts "FAILED (#{failed.size})"
+  puts "-" * 50
+  failed.last(3).each do |t|
+    puts "  #{t.id}: #{t.subject.to_s[0..50]}"
+    puts "    Reason: #{t.last_failure}" if t.last_failure
+  end
+  puts
+end
+
+puts "BACKLOG (#{pending.size} pending)"
+puts "-" * 50
+puts "  Ready to start: #{ready.size}"
+puts "  Pending:        #{pending.size}"
+puts "  Failed:         #{failed.size}"
+puts
+
+puts "-" * 50
+puts "Run 'agent-orchestrator' to spawn agents for ready tasks"
+puts "Run 'agent-task list' for full task list"
+puts

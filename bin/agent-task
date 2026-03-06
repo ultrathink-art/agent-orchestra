@@ -1,0 +1,304 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Agent Task — manage the local task queue
+#
+# Usage:
+#   agent-task add <role> <subject>      Create a new task
+#   agent-task ready <id>                Mark task ready for orchestrator
+#   agent-task claim <role>              Claim next ready task for role
+#   agent-task complete <id> [notes]     Mark task complete
+#   agent-task fail <id> [reason]        Mark task failed (retries 3x)
+#   agent-task cancel <id>               Cancel a task
+#   agent-task list [--status S] [--role R]
+#   agent-task show <id>                 Show task details
+#   agent-task status                    Status summary
+
+$LOAD_PATH.unshift File.join(__dir__, "..", "lib")
+require "agent_orchestra"
+
+class TaskCLI
+  def initialize(args)
+    @args = args
+    @command = args.shift
+  end
+
+  def run
+    case @command
+    when "add"       then cmd_add
+    when "ready"     then cmd_ready
+    when "claim"     then cmd_claim
+    when "complete"  then cmd_complete
+    when "fail"      then cmd_fail
+    when "cancel"    then cmd_cancel
+    when "list"      then cmd_list
+    when "show"      then cmd_show
+    when "status"    then cmd_status
+    when "reset"     then cmd_reset
+    when "--help", "-h", nil then show_help
+    else
+      puts "Unknown command: #{@command}"
+      show_help
+      exit 1
+    end
+  end
+
+  private
+
+  def queue
+    @queue ||= AgentOrchestra::Queue.new
+  end
+
+  def cmd_add
+    no_chain = !!@args.delete("--no-chain")
+    auto_ready = !!@args.delete("--ready")
+    role = @args[0]
+    subject = @args[1]
+    type = @args[2] || "feature"
+    priority = @args[3] || "P1"
+
+    unless role && subject
+      puts "Usage: agent-task add <role> <subject> [type] [priority] [--ready] [--no-chain]"
+      exit 1
+    end
+
+    task = AgentOrchestra::Task.new(
+      "id" => queue.next_id,
+      "role" => role,
+      "subject" => subject,
+      "type" => type,
+      "priority" => priority,
+      "status" => "pending"
+    )
+
+    # Auto-chain unless --no-chain
+    unless no_chain
+      task.next_tasks = default_chain(role, subject, priority)
+    end
+
+    queue.add(task)
+
+    if auto_ready
+      task.ready!
+      queue.update(task)
+    end
+
+    puts "Created task: #{task.id}"
+    puts "  Subject: #{task.subject}"
+    puts "  Role: #{task.role}"
+    puts "  Priority: #{task.priority}"
+    puts "  Status: #{task.status}"
+    if task.next_tasks
+      puts "  Chain: #{task.next_tasks.map { |t| t["role"] }.join(" -> ")}"
+    end
+    puts
+    unless auto_ready
+      puts "Task is pending. To make it ready:"
+      puts "  agent-task ready #{task.id}"
+    end
+  end
+
+  def cmd_ready
+    id = @args[0]
+    abort "Usage: agent-task ready <id>" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    task.ready!
+    queue.update(task)
+    puts "Task #{id} marked ready"
+  end
+
+  def cmd_claim
+    role = @args[0]
+    abort "Usage: agent-task claim <role>" unless role
+
+    ready = queue.ready_tasks
+    task = ready.find { |t| t.role == role || t.role == "any" }
+
+    unless task
+      puts "No ready tasks for role: #{role}"
+      exit 1
+    end
+
+    task.claim!(role)
+    queue.update(task)
+
+    puts "Claimed: #{task.id}"
+    puts "  Subject: #{task.subject}"
+    puts "  Priority: #{task.priority}"
+    puts
+    puts "Complete with: agent-task complete #{task.id}"
+  end
+
+  def cmd_complete
+    id = @args[0]
+    notes = @args[1]
+    abort "Usage: agent-task complete <id> [notes]" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    task.complete!(notes)
+    queue.update(task)
+    puts "Task #{id} marked complete"
+  end
+
+  def cmd_fail
+    id = @args[0]
+    reason = @args[1]
+    abort "Usage: agent-task fail <id> [reason]" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    task.fail!(reason)
+    queue.update(task)
+    puts "Task #{id} → #{task.status} (failures: #{task.failure_count}/3)"
+  end
+
+  def cmd_cancel
+    id = @args[0]
+    abort "Usage: agent-task cancel <id>" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    task.cancel!
+    queue.update(task)
+    puts "Task #{id} cancelled"
+  end
+
+  def cmd_reset
+    id = @args[0]
+    abort "Usage: agent-task reset <id>" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    task.reset!
+    queue.update(task)
+    puts "Task #{id} reset to ready"
+  end
+
+  def cmd_list
+    status_filter = nil
+    role_filter = nil
+
+    i = 0
+    while i < @args.length
+      case @args[i]
+      when "--status"
+        status_filter = @args[i + 1]
+        i += 2
+      when "--role"
+        role_filter = @args[i + 1]
+        i += 2
+      when "--all"
+        i += 1
+      else
+        i += 1
+      end
+    end
+
+    tasks = queue.list(status: status_filter, role: role_filter)
+
+    if tasks.empty?
+      puts "No tasks found"
+      return
+    end
+
+    puts "#{tasks.size} task(s)"
+    puts "=" * 80
+    tasks.each do |t|
+      status_tag = "[#{t.status}]".ljust(14)
+      role_tag = "(#{t.role})".ljust(14)
+      puts "#{t.id.ljust(12)} #{status_tag} #{role_tag} [#{t.priority}] #{t.subject}"
+    end
+  end
+
+  def cmd_show
+    id = @args[0]
+    abort "Usage: agent-task show <id>" unless id
+
+    task = queue.find(id)
+    abort "Task #{id} not found" unless task
+
+    puts "Task: #{task.id}"
+    puts "=" * 60
+    puts "Subject:    #{task.subject}"
+    puts "Status:     #{task.status}"
+    puts "Role:       #{task.role}"
+    puts "Type:       #{task.type}"
+    puts "Priority:   #{task.priority}"
+    puts "Owner:      #{task.owner || "(unassigned)"}"
+    puts "Created:    #{task.created_at}"
+    puts "Updated:    #{task.updated_at}"
+    puts "Claimed:    #{task.claimed_at}" if task.claimed_at
+    puts "Completed:  #{task.completed_at}" if task.completed_at
+    puts "Failures:   #{task.failure_count}" if task.failure_count > 0
+    puts "Last fail:  #{task.last_failure}" if task.last_failure
+    puts "Notes:      #{task.notes}" if task.notes
+    puts "Brief:      #{task.brief}" if task.brief
+    puts "PID:        #{task.agent_pid}" if task.agent_pid
+    puts "Log:        #{task.log_file}" if task.log_file
+    if task.next_tasks
+      puts "Next tasks: #{task.next_tasks.map { |t| "#{t["role"]}: #{t["subject"]}" }.join(", ")}"
+    end
+  end
+
+  def cmd_status
+    counts = queue.status_counts
+    total = counts.values.sum
+
+    puts "Task Queue Status"
+    puts "=" * 40
+    %w[ready pending claimed in_progress complete failed cancelled].each do |s|
+      count = counts[s] || 0
+      next if count == 0
+      printf "  %-15s %d\n", s, count
+    end
+    puts "-" * 40
+    printf "  %-15s %d\n", "total", total
+  end
+
+  def default_chain(role, subject, priority)
+    case role
+    when "coder"
+      [ { "role" => "qa", "subject" => "QA Review: #{subject}"[0..120], "priority" => priority } ]
+    when "product"
+      [ { "role" => "qa", "subject" => "QA Review (product): #{subject}"[0..120], "priority" => priority } ]
+    else
+      nil
+    end
+  end
+
+  def show_help
+    puts <<~HELP
+      Agent Orchestra — Task Management
+
+      Usage:
+        agent-task add <role> <subject> [type] [priority] [--ready] [--no-chain]
+        agent-task ready <id>              Mark task ready for orchestrator
+        agent-task claim <role>            Claim next ready task
+        agent-task complete <id> [notes]   Mark task complete
+        agent-task fail <id> [reason]      Return failed task to queue (retries 3x)
+        agent-task cancel <id>             Cancel a task
+        agent-task reset <id>              Reset claimed task to ready
+        agent-task list [--status S] [--role R]  List tasks
+        agent-task show <id>               Show task details
+        agent-task status                  Status summary
+
+      Roles: Define in agents.yml (e.g., coder, designer, qa, product)
+
+      Examples:
+        agent-task add coder "Fix login bug" bugfix P0
+        agent-task add coder "Add dark mode" --ready
+        agent-task add designer "Logo redesign" --no-chain
+        agent-task list --status ready --role coder
+    HELP
+  end
+end
+
+TaskCLI.new(ARGV.dup).run

@@ -1,0 +1,10 @@
+# State files (generated at runtime)
+.orchestra/
+*.lock
+
+# Ruby
+Gemfile.lock
+vendor/
+
+# OS
+.DS_Store

@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Agent Orchestrator — spawns Claude Code agents for queued tasks
+#
+# Usage:
+#   agent-orchestrator              Run once
+#   agent-orchestrator --daemon     Run continuously (poll every N seconds)
+#   agent-orchestrator --status     Show running agents and queue
+#   agent-orchestrator --dry-run    Show what would be spawned
+
+$LOAD_PATH.unshift File.join(__dir__, "..", "lib")
+require "agent_orchestra"
+
+case ARGV[0]
+when "--daemon"
+  AgentOrchestra::Orchestrator.new.run_daemon
+when "--status"
+  AgentOrchestra::Orchestrator.new.show_status
+when "--dry-run"
+  AgentOrchestra::Orchestrator.new(dry_run: true).run_once
+when "--help", "-h"
+  puts <<~HELP
+    Agent Orchestra — Orchestrator
+
+    Monitors the task queue and spawns Claude Code agents for ready tasks.
+
+    Usage:
+      agent-orchestrator              Run once (spawn agents, check completions)
+      agent-orchestrator --daemon     Run continuously (poll every #{AgentOrchestra.config.poll_interval}s)
+      agent-orchestrator --status     Show running agents and queue status
+      agent-orchestrator --dry-run    Preview what would be spawned
+
+    Configuration (agents.yml):
+      max_concurrent_agents: #{AgentOrchestra.config.max_concurrent_agents}
+      poll_interval:         #{AgentOrchestra.config.poll_interval}s
+      max_agent_runtime:     #{AgentOrchestra.config.max_agent_runtime}s
+      state_dir:             #{AgentOrchestra.config.state_dir}
+      agents_dir:            #{AgentOrchestra.config.agents_dir}
+
+    Task Flow:
+      pending → ready → claimed → in_progress → complete
+  HELP
+else
+  AgentOrchestra::Orchestrator.new.run_once
+end

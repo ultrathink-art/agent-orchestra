@@ -1,0 +1,28 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Agent Worker — entry point for spawned Claude Code agents
+#
+# Called by the orchestrator. Do not run directly.
+#
+# Environment variables (set by orchestrator):
+#   AGENT_TASK_ID          - Task ID
+#   AGENT_ROLE             - Agent role (coder, qa, etc.)
+#   AGENT_LOG_FILE         - Path to log file
+#   AGENT_STATE_FILE       - Path to .running state file
+#   AGENT_COMPLETION_FILE  - Path to write completion status
+#   AGENT_APPEND_PROMPT    - System prompt to append
+#   AGENT_TASK_PROMPT      - Task prompt to send
+#   AGENT_ORCHESTRA_ROOT   - Project root directory
+
+$stdout.sync = true
+$stderr.sync = true
+
+puts "[#{Time.now.strftime("%Y-%m-%d %H:%M:%S")}] [Worker #{ENV["AGENT_TASK_ID"]}] BOOT: ruby=#{RUBY_VERSION} pid=#{Process.pid} role=#{ENV["AGENT_ROLE"]}"
+
+$LOAD_PATH.unshift File.join(__dir__, "..", "lib")
+require "agent_orchestra"
+
+AgentOrchestra.root = ENV["AGENT_ORCHESTRA_ROOT"] || Dir.pwd
+
+exit AgentOrchestra::Worker.new.run

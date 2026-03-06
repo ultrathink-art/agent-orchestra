@@ -1,0 +1,48 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Queue Monitor — health monitoring and stale task recovery
+#
+# Usage:
+#   queue-monitor             Health check + stale task reset
+#   queue-monitor --status    Show queue status
+#   queue-monitor --stale     Reset stale tasks only
+#   queue-monitor --health    Run full health check
+
+$LOAD_PATH.unshift File.join(__dir__, "..", "lib")
+require "agent_orchestra"
+
+monitor = AgentOrchestra::Monitor.new
+
+case ARGV[0]
+when "--status"
+  monitor.show_status
+when "--stale"
+  stale = monitor.find_stale_tasks
+  if stale.empty?
+    puts "No stale tasks found"
+  else
+    monitor.reset_stale_tasks(stale)
+  end
+when "--health"
+  monitor.check_health
+when "--help", "-h"
+  puts <<~HELP
+    Agent Orchestra — Queue Monitor
+
+    Monitors queue health, detects stale agents, auto-recovers.
+
+    Usage:
+      queue-monitor             Health check + stale task reset
+      queue-monitor --status    Show queue status counts
+      queue-monitor --stale     Reset stale claimed tasks
+      queue-monitor --health    Run full health check
+
+    Thresholds:
+      Stale after:     60 minutes (process alive, no progress)
+      Orphan after:    5 minutes (process dead)
+      Max retries:     3 (then permanently failed)
+  HELP
+else
+  monitor.check_health
+end
