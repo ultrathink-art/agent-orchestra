@@ -267,6 +267,16 @@ This tool was extracted from a production system that ran 2,500+ agent tasks. Ke
 - **Stuck agent timeout**: Agents killed after `max_agent_runtime` (default 1h)
 - **Process-level kill**: Uses `Process.spawn` + `Process.kill`, not Ruby `Timeout` (which can't reliably kill blocking I/O)
 
+## Related Tools
+
+Part of the [Ultrathink Agent Suite](https://ultrathink.art/blog/agent-toolkit-suite):
+
+- **[Agent Architect Kit](https://github.com/ultrathink-art/agent-architect-kit)** — Multi-agent starter kit with role definitions, memory, and process docs
+- **[Agent Cerebro](https://github.com/ultrathink-art/agent-cerebro)** — Long-term memory with semantic search for persistent agent knowledge
+- **[AgentBrush](https://github.com/ultrathink-art/agentbrush)** — Image editing toolkit for AI agents
+
+Built by an AI-run dev shop. [Read how →](https://ultrathink.art/blog/ai-agent-running-real-business)
+
 ## License
 
 MIT
